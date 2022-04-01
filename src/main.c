@@ -1,14 +1,16 @@
 #include "main.h"
 
-struct do_listen_tcp_args {
+struct context {
   int fd_epoll;
+  pthread_t thread_tcp_listen;
+  pthread_attr_t thread_tcp_listen_attr;
 };
+
 void *do_listen_tcp(void *args_ptr) {
-  struct do_listen_tcp_args *args = (struct do_listen_tcp_args *)args_ptr;
+  struct context *ctx = (struct context *)args_ptr;
 
   int portNumber = 8080;
   printf("Starting http ipv4 server on port %i...\n", portNumber);
-  fflush(stdout);
 
   // set the listen on a ipv4 socket to serve files to browsers
   int domain = AF_INET;
@@ -53,8 +55,7 @@ void *do_listen_tcp(void *args_ptr) {
   }
   int r = 0;
   for (;;) {
-    if ((r = do_accept_tcp_request(fd_tcp_server_socket, args->fd_epoll)) !=
-        0) {
+    if ((r = do_accept_tcp_request(fd_tcp_server_socket, ctx->fd_epoll)) != 0) {
       fprintf(stderr, "fail to accept request %i\n", r);
       continue;
     }
@@ -69,6 +70,7 @@ struct http_header {
   char name[50];
   char value[4096];
 };
+
 struct http_request {
   char method[7];
   char path[8001]; // size following recommendation defined on RFC2616
@@ -158,11 +160,20 @@ int process_http_request(int fd, char *data_in) {
   if (s > 0) {
     if (s == 414) {
       char buf[] = "HTTP/2.0 414 URI Too long\n\n";
-      write(fd, buf, strlen(buf));
+      long unsigned int rv = write(fd, buf, strlen(buf));
+      if (rv != sizeof(buf)) {
+        fprintf(stderr, "WARN expected write %li bytes, but wrote %li",
+                sizeof(buf), rv);
+        return 1;
+      }
       return 0;
     }
     char buf[] = "HTTP/2.0 500 internal server error at request parsing\n\n";
-    write(fd, buf, strlen(buf));
+    long unsigned int rv = write(fd, buf, strlen(buf));
+    if (rv != strlen(buf)) {
+      fprintf(stderr, "WARN, expected to write %li, but wrote %li\n",
+              strlen(buf), rv);
+    }
     return 0;
   }
   if (strcmp(req.path, "/") == 0) {
@@ -201,51 +212,92 @@ Content-Type: text/html; charset=UTF-8\n\
   return 0;
 }
 
-int main() {
-  // prepare a poll to manage the connected clients
+// prepare a poll to manage the connected clients
+// retuns fd_epoll on success, or -1 on error
+static inline int prepareHttpClientPoll() {
   int fd_epoll;
   if ((fd_epoll = epoll_create(1)) == -1) {
+    return -1;
+  }
+  return fd_epoll;
+}
+
+// start the thread to listen the tcp port and wait for http input
+// update the ctx object with the thread and thread_attr
+// return 0 on success
+static inline int listenTCPThread(struct context *ctx) {
+  if (pthread_create(&ctx->thread_tcp_listen, &ctx->thread_tcp_listen_attr,
+                     do_listen_tcp, ctx) != 0) {
+    fprintf(stderr, "fail to create the tcp server accept thread %i: %s\n",
+            errno, strerror(errno));
+    return -1;
+  }
+  return 0;
+}
+
+#define HTTP_REQUEST_DATA_CHUNK_SIZE 4096
+// collect event data chunk and stores it on received_data up to
+// HTTP_REQUEST_DATA_CHUNK_SIZE bytes
+static inline void collect_event_data_chunk(struct tcp_event_data *d,
+                                            char *received_data) {
+  printf("reading data from %s:%s\n", d->client_host, d->client_port);
+  int r = read(d->fd_tcp_client_socket, &received_data[0],
+               HTTP_REQUEST_DATA_CHUNK_SIZE);
+  if (r > 0) {
+    printf("data received from %s:%s\t(%i bytes):\n%s\n", d->client_host,
+           d->client_port, r, &received_data[0]);
+  }
+}
+
+static inline void process_epoll_event(struct tcp_event_data *d,
+                                       char *received_data) {
+  collect_event_data_chunk(d, received_data);
+
+  // TODO DDOS mitigation: put this event on a free promises poll position
+  if (process_http_request(d->fd_tcp_client_socket, &received_data[0]) != 0) {
+    fprintf(stderr, "fail to process http request: %s", &received_data[0]);
+  }
+
+  // clean up this event
+  if (close(d->fd_tcp_client_socket) != 0) {
+    fprintf(stderr, "fail to close client connection on fd %i, %i: %s",
+            d->fd_tcp_client_socket, errno, strerror(errno));
+  }
+  free(d);
+}
+
+int main() {
+  struct context ctx;
+
+  if ((ctx.fd_epoll = prepareHttpClientPoll()) < 0) {
+    fprintf(stderr, "fail to create epoll %i: %s\n", errno, strerror(errno));
+    return 1;
+  }
+
+  if (listenTCPThread(&ctx) != 0) {
     fprintf(stderr, "fail to create epoll %i: %s\n", errno, strerror(errno));
     return 2;
   }
 
-  // start the thread to listen the tcp port and wait for http input
-  pthread_t thread_tcp_listen;
-  pthread_attr_t thread_tcp_listen_attr;
-  struct do_listen_tcp_args do_listen_tcp_args = {.fd_epoll = fd_epoll};
-  if (pthread_create(&thread_tcp_listen, &thread_tcp_listen_attr, do_listen_tcp,
-                     &do_listen_tcp_args) != 0) {
-    fprintf(stderr, "fail to create the tcp server accept thread %i: %s\n",
-            errno, strerror(errno));
-  }
-  ssize_t r;
-  char *received_data = malloc(1024);
+  // TODO DDOS mitigation: create a promise poll to asynchronous processing the
+  // http requests and responses to avoid overload main accepting thread
+  char *received_data = malloc(HTTP_REQUEST_DATA_CHUNK_SIZE);
+  // wait for connection and data from tcp sockets
+  struct tcp_event_data *d;
+#define MAXEVENTS 3
+  struct epoll_event event[MAXEVENTS];
   for (;;) {
-    struct epoll_event event[3];
-    int fd_tcp_ready = epoll_wait(fd_epoll, event, 3, 1000);
+    int fd_tcp_ready = epoll_wait(ctx.fd_epoll, event, MAXEVENTS, 1000);
     if (fd_tcp_ready == -1) {
       fprintf(stderr, "epoll event checking failed %i: %s\n", errno,
               strerror(errno));
     }
     for (int i = 0; i < fd_tcp_ready; i++) {
-      fflush(stdout);
-      struct tcp_event_data *d = (struct tcp_event_data *)event[i].data.ptr;
-      printf("reading data from %s:%s\n", d->client_host, d->client_port);
-      r = read(d->fd_tcp_client_socket, &received_data[0], 1024);
-      if (r > 0) {
-        printf("data received from %s:%s: [%s]", d->client_host, d->client_port,
-               &received_data[0]);
-      }
-      if (process_http_request(d->fd_tcp_client_socket, &received_data[0]) !=
-          0) {
-        fprintf(stderr, "fail to process http request: %s", &received_data[0]);
-      }
-      if (close(d->fd_tcp_client_socket) != 0) {
-        fprintf(stderr, "fail to close client connection on fd %i, %i: %s",
-                d->fd_tcp_client_socket, errno, strerror(errno));
-      }
-      free(event[i].data.ptr);
+      d = (struct tcp_event_data *)event[i].data.ptr;
+      process_epoll_event(d, received_data);
     }
+    // TODO DDOS mitigation: wait MAXEVENTS promises to be free on the promises
+    // POLL, or timeout?
     printf(".");
     fflush(stdout);
   }

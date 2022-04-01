@@ -1,0 +1,3 @@
+[submodule "c-promises"]
+	path = c-promises
+	url = git@github.com:glaudiston/c-promises

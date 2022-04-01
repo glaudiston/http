@@ -28,8 +28,9 @@ int do_accept_tcp_request(int fd_tcp_server_socket, int fd_epoll) {
   struct epoll_event epoll_evt = {.events = EPOLLIN, .data = {.ptr = d}};
   i = epoll_ctl(fd_epoll, EPOLL_CTL_ADD, fd_tcp_client_socket, &epoll_evt);
   if (i != 0) {
-    fprintf(stderr, "fail to add client %s:%s to epoll %i, %i: %s\n",
-            d->client_host, d->client_port, i, errno, strerror(errno));
+    fprintf(stderr, "fail to add client %s:%s to epoll(%i) %i, %i: %s\n",
+            d->client_host, d->client_port, fd_epoll, i, errno,
+            strerror(errno));
     fprintf(stderr, "fd epoll %i\nfd cli %i", fd_epoll, fd_tcp_client_socket);
     return 3;
   }
