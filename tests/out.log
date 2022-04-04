@@ -1,3 +1,25 @@
+Starting http ipv4 server on port 8080...
+waiting a new tcp connection...
+Connection accepted from localhost:59416
+waiting a new tcp connection...
+reading data from localhost:59416
+data received from localhost:59416	(78 bytes):
+GET / HTTP/1.1
+Host: localhost:8080
+User-Agent: curl/7.74.0
+Accept: */*
+
+
+
+first line parsed: 
+ method:[GET]
+ path:[/]
+ protocol:[HTTP/1.1]
+
+RESPONSE:
+HTTP/2.0 200 OK
+Content-Type: text/html; charset=UTF-8
+
 <!DOCTYPE html>
 <html>
 	<head>
@@ -30,3 +52,5 @@
 		</script>
 	</body>
 </html>
+
+wrote r=845 to resp, strlen(buff)=845.

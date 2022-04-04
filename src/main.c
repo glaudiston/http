@@ -2,6 +2,8 @@
 
 struct context {
   int fd_epoll;
+  int port_number;
+  char static_path[1 << 10];
   pthread_t thread_tcp_listen;
   pthread_attr_t thread_tcp_listen_attr;
 };
@@ -9,8 +11,7 @@ struct context {
 void *do_listen_tcp(void *args_ptr) {
   struct context *ctx = (struct context *)args_ptr;
 
-  int portNumber = 8080;
-  printf("Starting http ipv4 server on port %i...\n", portNumber);
+  printf("Starting http ipv4 server on port %i...\n", ctx->port_number);
 
   // set the listen on a ipv4 socket to serve files to browsers
   int domain = AF_INET;
@@ -34,7 +35,7 @@ void *do_listen_tcp(void *args_ptr) {
   struct sockaddr_in addr;
   addr.sin_family = AF_INET;
   addr.sin_addr.s_addr = inet_addr("0.0.0.0");
-  addr.sin_port = htons(portNumber);
+  addr.sin_port = htons(ctx->port_number);
   if (bind(fd_tcp_server_socket, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
     fprintf(stderr, "bind fail %i: %s\n", errno, strerror(errno));
     char *thread_ret = malloc(sizeof(char));
@@ -67,7 +68,7 @@ void *do_listen_tcp(void *args_ptr) {
 };
 
 struct http_header {
-  char name[50];
+  char name[127];
   char value[4096];
 };
 
@@ -116,6 +117,7 @@ int parse_request(char *data, struct http_request *req) {
   char line[1024];
   int ln = 0;
   req->headers = malloc(sizeof(struct http_header));
+  req->header_count = 0;
   char parsing_headers = 1;
   for (int i = 0; i < strlen(data); i++) {
     if (parsing_headers) {
@@ -154,7 +156,94 @@ struct response_cache {
   char *template_content;
 } response_cache = {.template_content = 0};
 
-int process_http_request(int fd, char *data_in) {
+int response_with_list_template(struct context *ctx, int fd, char *path) {
+  if (response_cache.template_content == NULL) {
+    response_cache.template_content = malloc(1024);
+    int rv;
+    if ((rv = getFileContent("./http-templates/list.html",
+                             response_cache.template_content)) < 0) {
+      fprintf(stderr, "Request fail path[%s] ret %i\n", path, rv);
+      // internal_server_error();
+      return 1;
+    }
+  }
+  char buff[1 << 10];
+  sprintf(&buff[0], "HTTP/2.0 200 OK\n\
+Content-Type: text/html; charset=UTF-8\n\
+\n\
+%s",
+          response_cache.template_content);
+  printf("\nRESPONSE:\n%s\n", buff);
+  ssize_t r = write(fd, buff, strlen(buff));
+  printf("wrote r=%li to resp, strlen(buff)=%li", r, strlen(buff));
+  if (r != strlen(buff)) {
+    return 1;
+  }
+  return 0;
+}
+
+int response_with_static_resource(struct context *ctx, int fd, char *abspath) {
+  // TODO write cache
+  char file_content[1 << 13];
+  int rv;
+  if ((rv = getFileContent(abspath, file_content)) < 0) {
+    if (rv == -3) // is a directory
+      return response_with_list_template(ctx, fd, abspath);
+    fprintf(stderr, "Request fail file path[%s] ret %i\n", abspath, rv);
+    // internal_server_error();
+    return 1;
+  }
+  char buff[1 << 14];
+  sprintf(&buff[0], "HTTP/2.0 200 OK\n\
+Content-Type: text/plain; charset=UTF-8\n\
+\n\
+%s",
+          file_content);
+  printf("\nRESPONSE:\n%s\n", buff);
+  ssize_t r = write(fd, buff, strlen(buff));
+  printf("wrote r=%li to resp, strlen(buff)=%li", r, strlen(buff));
+  if (r != strlen(buff)) {
+    return 1;
+  }
+  return 0;
+}
+
+int response_with_server_api(struct context *ctx, int fd, char *path) {
+  char buff[1 << 14];
+  char json[1 << 13];
+  printf("api requested %s\n", path);
+  if (strcmp(path, "/.api/list") == 0) {
+    char files[1 << 12];
+    files[0] = 0;
+    struct dirent *de;
+    DIR *dr = opendir(ctx->static_path);
+    if (dr == NULL) {
+      fprintf(stderr, "ERROR: unable to open directory");
+    }
+    while ((de = readdir(dr)) != NULL) {
+      if (de->d_name[0] == '.')
+        continue;
+      sprintf(&files[strlen(files)], ", \"%s\"", de->d_name);
+    }
+    closedir(dr);
+    sprintf(json, "{ \"status\": \"OK\", \"entries\": [ \".\" %s ] }", files);
+  } else {
+    sprintf(json, "{ \"message\": \"invalid server api\" }");
+  }
+  sprintf(&buff[0], "HTTP/2.0 200 OK\n\
+Content-Type: application/json; charset=UTF-8\n\
+\n\
+%s",
+          json);
+  printf("\nAPI RESPONSE:\n%s\n", buff);
+  ssize_t r = write(fd, buff, strlen(buff));
+  if (r != strlen(buff)) {
+    return 1;
+  }
+  return 0;
+}
+
+int process_http_request(struct context *ctx, int fd, char *data_in) {
   struct http_request req;
   int s = parse_request(data_in, &req);
   if (s > 0) {
@@ -176,32 +265,15 @@ int process_http_request(int fd, char *data_in) {
     }
     return 0;
   }
-  if (strcmp(req.path, "/") == 0) {
-    if (response_cache.template_content == NULL) {
-      response_cache.template_content = malloc(1024);
-      if (getFileContent("./http-templates/list.html",
-                         response_cache.template_content) != 0) {
-        fprintf(stderr, "Request fail path[%s]", req.path);
-        // internal_server_error();
-        return 1;
-      }
-    }
-    char buff[6000];
-    sprintf(&buff[0], "HTTP/2.0 200 OK\n\
-Content-Type: text/html; charset=UTF-8\n\
-\n\
-%s",
-            response_cache.template_content);
-    // TODO list files
-    printf("\nRESPONSE:\n%s\n", buff);
-    ssize_t r = write(fd, buff, strlen(buff));
-    printf("wrote r=%li to resp, strlen(buff)=%li", r, strlen(buff));
-    if (r != strlen(buff)) {
-      return 1;
-    }
-    return 0;
+  if (strncmp(req.path, "/.api/", 6) == 0) {
+    return response_with_server_api(ctx, fd, req.path);
   }
-  char buff[5000] = "HTTP/2.0 404 OK\n\
+  char relativepath[1 << 15];
+  sprintf(relativepath, "./%s%s", ctx->static_path, req.path);
+  if (access(relativepath, F_OK) == 0) {
+    return response_with_static_resource(ctx, fd, relativepath);
+  }
+  char buff[] = "HTTP/2.0 404 OK\n\
 Content-Type: text/html; charset=UTF-8\n\
 \n\
 <!doctype html><html><body>Not found</body></html>\r\n";
@@ -249,12 +321,14 @@ static inline void collect_event_data_chunk(struct tcp_event_data *d,
   }
 }
 
-static inline void process_epoll_event(struct tcp_event_data *d,
+static inline void process_epoll_event(struct context *ctx,
+                                       struct tcp_event_data *d,
                                        char *received_data) {
   collect_event_data_chunk(d, received_data);
 
   // TODO DDOS mitigation: put this event on a free promises poll position
-  if (process_http_request(d->fd_tcp_client_socket, &received_data[0]) != 0) {
+  if (process_http_request(ctx, d->fd_tcp_client_socket, &received_data[0]) !=
+      0) {
     fprintf(stderr, "fail to process http request: %s", &received_data[0]);
   }
 
@@ -266,8 +340,37 @@ static inline void process_epoll_event(struct tcp_event_data *d,
   free(d);
 }
 
-int main() {
+static inline int get_server_port(int argc, char *argv[]) {
+#define DEFAULT_SERVER_PORT 8080
+  int user_selected_port = 0;
+  if (argc > 1)
+    user_selected_port = atoi(argv[1]);
+  if (user_selected_port == 0) {
+    logger_warnf("invalid argument port. using port %i. \nsample use: %s "
+                 "8080 /path/to/static/files",
+                 DEFAULT_SERVER_PORT, argv[0]);
+    user_selected_port = DEFAULT_SERVER_PORT;
+  }
+  return argc == 1 ? DEFAULT_SERVER_PORT : user_selected_port;
+}
+
+void get_static_path(char *static_path, int argc, char *argv[]) {
+  if (argc > 2) {
+    strcpy(static_path, argv[2]);
+  } else {
+    sprintf(static_path, ".");
+  }
+  DIR *dr = opendir(static_path);
+  if (dr == NULL) {
+    fprintf(stderr, "ERROR: unable to open directory [%s]", static_path);
+  }
+  closedir(dr);
+}
+
+int main(int argc, char *argv[]) {
   struct context ctx;
+  ctx.port_number = get_server_port(argc, argv);
+  get_static_path(ctx.static_path, argc, argv);
 
   if ((ctx.fd_epoll = prepareHttpClientPoll()) < 0) {
     fprintf(stderr, "fail to create epoll %i: %s\n", errno, strerror(errno));
@@ -275,7 +378,8 @@ int main() {
   }
 
   if (listenTCPThread(&ctx) != 0) {
-    fprintf(stderr, "fail to create epoll %i: %s\n", errno, strerror(errno));
+    fprintf(stderr, "fail to create a thread to listen the tcp socket %i: %s\n",
+            errno, strerror(errno));
     return 2;
   }
 
@@ -294,7 +398,7 @@ int main() {
     }
     for (int i = 0; i < fd_tcp_ready; i++) {
       d = (struct tcp_event_data *)event[i].data.ptr;
-      process_epoll_event(d, received_data);
+      process_epoll_event(&ctx, d, received_data);
     }
     // TODO DDOS mitigation: wait MAXEVENTS promises to be free on the promises
     // POLL, or timeout?

@@ -1,0 +1,2 @@
+[WARN]	invalid argument port. using port 8080. 
+sample use: bin/http 8080 /path/to/static/filesfail to read the file [././] 21: Is a directory

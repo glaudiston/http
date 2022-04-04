@@ -1,7 +1,10 @@
+#ifndef _HTTP_MAIN_H_
 #include "../c-promises/promises.h"
 #include "fs.h"
 #include "http_accept.h"
+#include "logger.h"
 #include <arpa/inet.h>
+#include <dirent.h>
 #include <errno.h>
 #include <netdb.h>
 #include <netinet/ip.h>
@@ -13,3 +16,4 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
+#endif
