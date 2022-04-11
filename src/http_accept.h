@@ -2,6 +2,7 @@
 #define _HTTP_ACCEPT_H_
 #include "fs.h"
 #include "http_structs.h"
+#include "logger.c"
 #include "struct_context.h"
 #include <arpa/inet.h>
 #include <dirent.h>

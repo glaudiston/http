@@ -18,7 +18,7 @@ void *do_listen_tcp(void *args_ptr) {
   socklen_t optlen = sizeof(val);
   if (setsockopt(fd_tcp_server_socket, level, optname, optval, optlen) != 0) {
     fprintf(stderr, "setsockopt errno %i: %s", errno, strerror(errno));
-    char *thread_ret = malloc(sizeof(char));
+    char *thread_ret = (char *)malloc(sizeof(char));
     char c = 1;
     memcpy(thread_ret, &c, 1);
     return thread_ret;
@@ -30,7 +30,7 @@ void *do_listen_tcp(void *args_ptr) {
   addr.sin_port = htons(ctx->port_number);
   if (bind(fd_tcp_server_socket, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
     fprintf(stderr, "bind fail %i: %s\n", errno, strerror(errno));
-    char *thread_ret = malloc(sizeof(char));
+    char *thread_ret = (char *)malloc(sizeof(char));
     char c = 2;
     memcpy(thread_ret, &c, 1);
     return thread_ret;
@@ -41,7 +41,7 @@ void *do_listen_tcp(void *args_ptr) {
   int backlog = atoi(buf);
   if (listen(fd_tcp_server_socket, backlog) != 0) {
     fprintf(stderr, "listen fails %i: %s\n", errno, strerror(errno));
-    char *thread_ret = malloc(sizeof(char));
+    char *thread_ret = (char *)malloc(sizeof(char));
     char c = 3;
     memcpy(thread_ret, &c, 1);
     return thread_ret;
@@ -73,7 +73,8 @@ int do_accept_tcp_request(int fd_tcp_server_socket, int fd_epoll) {
             strerror(errno));
     return 1;
   }
-  struct tcp_event_data *d = malloc(sizeof(struct tcp_event_data));
+  struct tcp_event_data *d =
+      (struct tcp_event_data *)malloc(sizeof(struct tcp_event_data));
   int i = getnameinfo((struct sockaddr *)&cli_addr, cli_addrsize,
                       d->client_host, sizeof(d->client_host), d->client_port,
                       sizeof(d->client_port), 0);
@@ -82,7 +83,7 @@ int do_accept_tcp_request(int fd_tcp_server_socket, int fd_epoll) {
             gai_strerror(i));
     return 2;
   }
-  printf("Connection accepted from %s:%s\n", d->client_host, d->client_port);
+  printf("\nConnection accepted from %s:%s\n", d->client_host, d->client_port);
   d->fd_tcp_client_socket = fd_tcp_client_socket;
   struct epoll_event epoll_evt = {.events = EPOLLIN, .data = {.ptr = d}};
   i = epoll_ctl(fd_epoll, EPOLL_CTL_ADD, fd_tcp_client_socket, &epoll_evt);
@@ -101,12 +102,14 @@ int do_accept_tcp_request(int fd_tcp_server_socket, int fd_epoll) {
 int parse_request(char *data, struct http_request *req) {
   char line[1024];
   int ln = 0;
-  req->headers = malloc(sizeof(struct http_header));
+  req->headers = (struct http_header *)malloc(sizeof(struct http_header));
   req->header_count = 0;
   char parsing_headers = 1;
   for (int i = 0; i < strlen(data); i++) {
     if (parsing_headers) {
       i += lcpy(&data[i], &line[0]);
+      if (strlen(line) == 0)
+        continue;
       ln++;
       int s = 0;
       if (ln == 1) {
@@ -119,13 +122,15 @@ int parse_request(char *data, struct http_request *req) {
         printf(
             "\nfirst line parsed: \n method:[%s]\n path:[%s]\n protocol:[%s]\n",
             req->method, req->path, req->protocol);
+        continue;
       }
-      req->headers = realloc(req->headers,
-                             sizeof(struct http_header) * ++req->header_count);
+      req->headers = (struct http_header *)realloc(
+          req->headers, sizeof(struct http_header) * ++req->header_count);
       // resize readers +1
       struct http_header *h = &req->headers[req->header_count - 1];
       s += wcpy(&line[s], h->name);
-      s += lcpy(&line[s], h->value);
+      s += lcpy(&line[s + 1], h->value);
+      h->name[strlen(h->name) - 1] = '\0'; // remove the last byte ':'
     } else {
       req->body = &data[i];
     }
@@ -137,18 +142,101 @@ int parse_request(char *data, struct http_request *req) {
   return 0;
 }
 
+int sanatize_path(char *path, char *sanatized_path) {
+  char valid_char[256];
+  int i;
+  for (i = 0; i < 256; i++) {
+    valid_char[i] = 0;
+  }
+  char valid_char_list[66] =
+      "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-.:/";
+  for (i = 0; i < strlen(valid_char_list); i++) {
+    valid_char[(int)valid_char_list[i]] = 1;
+  }
+
+  fprintf(stderr, "\n-- checking path [%s][%li]\n", path, strlen(path));
+  int rv = 0;
+  char c;
+  char lc = 0;
+  int pp = 0;  // path pos
+  int hp = 0;  // host pos
+  int ptp = 0; // port pos
+  char has_protocol = 0;
+  char parsing_host = 0;
+  char parsing_port = 0;
+  char protocol[50];
+  protocol[0] = 0;
+  char sanatized_host[200];
+  sanatized_host[0] = 0;
+  char s_port[5];
+  s_port[0] = 0;
+  for (i = 0; i < strlen(path); i++) {
+    c = path[i];
+    if (c == ':' && protocol[0] == 0) {
+      // check if we are at protocol part
+      strcpy(protocol, sanatized_path);
+      protocol[pp] = 0; // ensure close the str;
+      logger_debugf("protocol %s\n", protocol);
+      has_protocol = 1;
+      pp = 0;
+      continue;
+    }
+    if (has_protocol) {
+      if (protocol[0] != 0 && c == ':') {
+        parsing_port = 1;
+        // parse port
+      }
+      if (parsing_host && c == '/') {
+        parsing_host = 0;
+        parsing_port = 0;
+        logger_debugf("host %s\n", sanatized_host);
+      } else if (c == '/' && lc == c && pp == 1) {
+        parsing_host = 1;
+        pp = 0;
+        continue;
+      }
+    }
+    if (!valid_char[(int)c] || (c == '.' && lc == c /* avoid '..' */)) {
+      rv = 1;
+      break;
+    }
+    fprintf(stderr, "%i=[%c]", pp, c);
+    if (parsing_host) {
+      sanatized_host[hp++] = c;
+    } else if (parsing_port) {
+      s_port[ptp++] = c;
+    } else {
+      sanatized_path[pp++] = c;
+    }
+    lc = c;
+  }
+  sanatized_path[pp] = 0;
+  s_port[ptp] = 0;
+  logger_debugf("sanatize [%s], protocol [%s], host [%s] path [%s]\n", rv,
+                protocol, sanatized_host, sanatized_path);
+  fflush(stderr);
+  return rv;
+}
+
 int response_with_server_api(struct context *ctx, int fd, char *path) {
   char buff[1 << 14];
   char json[1 << 13];
-  printf("api requested %s\n", path);
-  if (strcmp(path, "/.api/list") == 0) {
-    char files[1 << 12];
-    files[0] = 0;
-    struct dirent *de;
-    DIR *dr = opendir(ctx->static_path);
-    if (dr == NULL) {
-      fprintf(stderr, "ERROR: unable to open directory");
-    }
+  printf("api requested \"%s\"\n", path);
+  char sanatized_path[4096];
+  char target_sanatized_path[5119];
+  sanatize_path(path, &sanatized_path[0]);
+  snprintf(target_sanatized_path, 5119, "%s%s", ctx->static_path,
+           sanatized_path);
+  char files[1 << 12];
+  files[0] = 0;
+  struct dirent *de;
+  DIR *dr = opendir(target_sanatized_path);
+  if (dr == NULL) {
+    fprintf(stderr, "ERROR: unable to open directory \"%s\"",
+            target_sanatized_path);
+    sprintf(json, "{ \"status\": \"OPEN_FAIL\", \"path\": \"%s\" }",
+            sanatized_path);
+  } else {
     while ((de = readdir(dr)) != NULL) {
       if (de->d_name[0] == '.')
         continue;
@@ -156,8 +244,6 @@ int response_with_server_api(struct context *ctx, int fd, char *path) {
     }
     closedir(dr);
     sprintf(json, "{ \"status\": \"OK\", \"entries\": [ \".\" %s ] }", files);
-  } else {
-    sprintf(json, "{ \"message\": \"invalid server api\" }");
   }
   sprintf(&buff[0], "HTTP/2.0 200 OK\n\
 Content-Type: application/json; charset=UTF-8\n\
@@ -174,7 +260,7 @@ Content-Type: application/json; charset=UTF-8\n\
 
 int response_with_list_template(struct context *ctx, int fd, char *path) {
   if (response_cache.template_content == NULL) {
-    response_cache.template_content = malloc(1024);
+    response_cache.template_content = (char *)malloc(1024);
     int rv;
     if ((rv = getFileContent("./http-templates/list.html",
                              response_cache.template_content)) < 0) {
@@ -198,14 +284,14 @@ Content-Type: text/html; charset=UTF-8\n\
   return 0;
 }
 
-int response_with_static_resource(struct context *ctx, int fd, char *abspath) {
+int response_with_static_resource(struct context *ctx, int fd, char *filepath) {
   // TODO write cache
   char file_content[1 << 13];
   int rv;
-  if ((rv = getFileContent(abspath, file_content)) < 0) {
+  if ((rv = getFileContent(filepath, file_content)) < 0) {
     if (rv == -3) // is a directory
-      return response_with_list_template(ctx, fd, abspath);
-    fprintf(stderr, "Request fail file path[%s] ret %i\n", abspath, rv);
+      return response_with_list_template(ctx, fd, filepath);
+    fprintf(stderr, "Request fail file path[%s] ret %i\n", filepath, rv);
     // internal_server_error();
     return 1;
   }
@@ -224,11 +310,25 @@ Content-Type: text/plain; charset=UTF-8\n\
   return 0;
 }
 
+int get_header_value(struct http_request *req, char *header_name, char *buf) {
+  int i = 0;
+  int rv = -1;
+  for (i = 0; i < req->header_count; i++) {
+    if (strcmp(req->headers[i].name, header_name) == 0) {
+      struct http_header *h = &req->headers[i];
+      strcpy(buf, h->value);
+      rv = 0;
+      break;
+    }
+  }
+  return rv;
+}
+
 int process_http_request(struct context *ctx, int fd, char *data_in) {
   struct http_request req;
-  int s = parse_request(data_in, &req);
-  if (s > 0) {
-    if (s == 414) {
+  int errcode = parse_request(data_in, &req);
+  if (errcode > 0) {
+    if (errcode == 414) {
       char buf[] = "HTTP/2.0 414 URI Too long\n\n";
       long unsigned int rv = write(fd, buf, strlen(buf));
       if (rv != sizeof(buf)) {
@@ -246,14 +346,28 @@ int process_http_request(struct context *ctx, int fd, char *data_in) {
     }
     return 0;
   }
+  char referer_path[4096];
+  get_header_value(&req, "Referer", &referer_path[0]);
   if (strncmp(req.path, "/.api/", 6) == 0) {
-    return response_with_server_api(ctx, fd, req.path);
+    // TODO user Referer header
+    return response_with_server_api(ctx, fd, referer_path);
   }
   char relativepath[1 << 15];
-  sprintf(relativepath, "./%s%s", ctx->static_path, req.path);
-  if (access(relativepath, F_OK) == 0) {
+  char sanatized_path[1 << 13];
+  char sanatized_refer[1 << 13];
+  sanatize_path(referer_path, &sanatized_refer[0]);
+  sanatize_path(req.path, &sanatized_path[0]);
+  if (sanatized_path[0] == '/') {
+    sprintf(relativepath, "./%s%s", ctx->static_path, &sanatized_path[0]);
+  } else {
+    sprintf(relativepath, "./%s%s%s", ctx->static_path, &sanatized_refer[0],
+            &sanatized_path[0]);
+  }
+  logger_debugf("accessing %s", relativepath);
+  if ((errcode = access(relativepath, F_OK)) == 0) {
     return response_with_static_resource(ctx, fd, relativepath);
   }
+  logger_debugf("error %i accessing %s", errcode, relativepath);
   char buff[] = "HTTP/2.0 404 OK\n\
 Content-Type: text/html; charset=UTF-8\n\
 \n\
