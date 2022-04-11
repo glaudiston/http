@@ -3,4 +3,5 @@
 #include <stdarg.h>
 #include <stdio.h>
 extern void logger_warnf(const char *fmt, ...);
+extern void logger_debugf(const char *fmt, ...);
 #endif
