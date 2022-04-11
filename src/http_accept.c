@@ -143,6 +143,7 @@ int parse_request(char *data, struct http_request *req) {
 }
 
 int sanatize_path(char *path, char *sanatized_path) {
+  sanatized_path[0] = 0;
   char valid_char[256];
   int i;
   for (i = 0; i < 256; i++) {
@@ -170,11 +171,13 @@ int sanatize_path(char *path, char *sanatized_path) {
   sanatized_host[0] = 0;
   char s_port[5];
   s_port[0] = 0;
-  for (i = 0; i < strlen(path); i++) {
+  int len_path = strlen(path);
+  for (i = 0; i < len_path; i++) {
     c = path[i];
     if (c == ':' && protocol[0] == 0) {
       // check if we are at protocol part
       strcpy(protocol, sanatized_path);
+      sanatized_path[0] = 0;
       protocol[pp] = 0; // ensure close the str;
       logger_debugf("protocol %s\n", protocol);
       has_protocol = 1;
@@ -190,7 +193,8 @@ int sanatize_path(char *path, char *sanatized_path) {
         parsing_host = 0;
         parsing_port = 0;
         logger_debugf("host %s\n", sanatized_host);
-      } else if (c == '/' && lc == c && pp == 1) {
+        pp = 0;
+      } else if (c == '/' && lc == c && pp == 0) {
         parsing_host = 1;
         pp = 0;
         continue;
@@ -206,13 +210,18 @@ int sanatize_path(char *path, char *sanatized_path) {
     } else if (parsing_port) {
       s_port[ptp++] = c;
     } else {
-      sanatized_path[pp++] = c;
+      if (pp == 0 && c == '/') { // let's ignore the / on the first char
+        if (i > len_path - 2) {
+          pp++;
+        }
+      } else
+        sanatized_path[pp++] = c;
     }
     lc = c;
   }
   sanatized_path[pp] = 0;
   s_port[ptp] = 0;
-  logger_debugf("sanatize [%s], protocol [%s], host [%s] path [%s]\n", rv,
+  logger_debugf("sanatize [%i], protocol [%s], host [%s] path [%s]\n", rv,
                 protocol, sanatized_host, sanatized_path);
   fflush(stderr);
   return rv;
@@ -224,11 +233,13 @@ int response_with_server_api(struct context *ctx, int fd, char *path) {
   printf("api requested \"%s\"\n", path);
   char sanatized_path[4096];
   char target_sanatized_path[5119];
+  logger_debugf("sanatize_path \"%s\"\n", path);
   sanatize_path(path, &sanatized_path[0]);
   snprintf(target_sanatized_path, 5119, "%s%s", ctx->static_path,
            sanatized_path);
   char files[1 << 12];
   files[0] = 0;
+  files[1] = 0;
   struct dirent *de;
   DIR *dr = opendir(target_sanatized_path);
   if (dr == NULL) {
@@ -238,12 +249,10 @@ int response_with_server_api(struct context *ctx, int fd, char *path) {
             sanatized_path);
   } else {
     while ((de = readdir(dr)) != NULL) {
-      if (de->d_name[0] == '.')
-        continue;
       sprintf(&files[strlen(files)], ", \"%s\"", de->d_name);
     }
     closedir(dr);
-    sprintf(json, "{ \"status\": \"OK\", \"entries\": [ \".\" %s ] }", files);
+    sprintf(json, "{ \"status\": \"OK\", \"entries\": [ %s ] }", &files[1]);
   }
   sprintf(&buff[0], "HTTP/2.0 200 OK\n\
 Content-Type: application/json; charset=UTF-8\n\
@@ -258,13 +267,14 @@ Content-Type: application/json; charset=UTF-8\n\
   return 0;
 }
 
-int response_with_list_template(struct context *ctx, int fd, char *path) {
+int response_with_list_template(struct context *ctx, int fd) {
+  logger_debugf("respond with list template\n");
   if (response_cache.template_content == NULL) {
     response_cache.template_content = (char *)malloc(1024);
     int rv;
     if ((rv = getFileContent("./http-templates/list.html",
                              response_cache.template_content)) < 0) {
-      fprintf(stderr, "Request fail path[%s] ret %i\n", path, rv);
+      fprintf(stderr, "Request html template list.html fail ret %i\n", rv);
       // internal_server_error();
       return 1;
     }
@@ -285,29 +295,7 @@ Content-Type: text/html; charset=UTF-8\n\
 }
 
 int response_with_static_resource(struct context *ctx, int fd, char *filepath) {
-  // TODO write cache
-  char file_content[1 << 13];
-  int rv;
-  if ((rv = getFileContent(filepath, file_content)) < 0) {
-    if (rv == -3) // is a directory
-      return response_with_list_template(ctx, fd, filepath);
-    fprintf(stderr, "Request fail file path[%s] ret %i\n", filepath, rv);
-    // internal_server_error();
-    return 1;
-  }
-  char buff[1 << 14];
-  sprintf(&buff[0], "HTTP/2.0 200 OK\n\
-Content-Type: text/plain; charset=UTF-8\n\
-\n\
-%s",
-          file_content);
-  printf("\nRESPONSE:\n%s\n", buff);
-  ssize_t r = write(fd, buff, strlen(buff));
-  printf("wrote r=%li to resp, strlen(buff)=%li", r, strlen(buff));
-  if (r != strlen(buff)) {
-    return 1;
-  }
-  return 0;
+  return stream_file_content(fd, filepath);
 }
 
 int get_header_value(struct http_request *req, char *header_name, char *buf) {
@@ -347,6 +335,7 @@ int process_http_request(struct context *ctx, int fd, char *data_in) {
     return 0;
   }
   char referer_path[4096];
+  referer_path[0] = 0;
   get_header_value(&req, "Referer", &referer_path[0]);
   if (strncmp(req.path, "/.api/", 6) == 0) {
     // TODO user Referer header
@@ -355,17 +344,48 @@ int process_http_request(struct context *ctx, int fd, char *data_in) {
   char relativepath[1 << 15];
   char sanatized_path[1 << 13];
   char sanatized_refer[1 << 13];
+  logger_debugf("sanatize refer \"%s\"\n", referer_path);
   sanatize_path(referer_path, &sanatized_refer[0]);
-  sanatize_path(req.path, &sanatized_path[0]);
-  if (sanatized_path[0] == '/') {
-    sprintf(relativepath, "./%s%s", ctx->static_path, &sanatized_path[0]);
+  logger_debugf("sanatized refer \"%s\"\n", sanatized_refer);
+  if (sanatized_refer[1] == 0) {
+    sanatized_refer[0] = 0;
   } else {
-    sprintf(relativepath, "./%s%s%s", ctx->static_path, &sanatized_refer[0],
-            &sanatized_path[0]);
+    if (sanatized_refer[0] != 0 &&
+        sanatized_refer[strlen(sanatized_refer) - 1] != '/') {
+      sanatized_refer[strlen(sanatized_refer)] = '/';
+      sanatized_refer[strlen(sanatized_refer)] = 0;
+    }
   }
-  logger_debugf("accessing %s", relativepath);
+  logger_debugf("sanatize  path: \"%s\"\n", req.path);
+  sanatize_path(req.path, &sanatized_path[0]);
+  logger_debugf("sanatized  path: \"%s\"\n", sanatized_path);
+  if (sanatized_refer[0] != 0 && is_dir(sanatized_refer)) {
+    logger_debugf("need to put it relative to referer [%s]", sanatized_refer);
+    sprintf(relativepath, "%s%s%s", ctx->static_path, &sanatized_refer[0],
+            &sanatized_path[0]);
+  } else {
+    logger_debugf("no Referer header.");
+    sprintf(relativepath, "%s%s", ctx->static_path, &sanatized_path[0]);
+  }
+  logger_debugf("accessing \"%s\"...\n", relativepath);
+  if (is_dir(relativepath)) {
+    return response_with_list_template(ctx, fd);
+  }
   if ((errcode = access(relativepath, F_OK)) == 0) {
-    return response_with_static_resource(ctx, fd, relativepath);
+    errcode = stream_file_content(fd, relativepath);
+    if (errcode == 0) {
+      return 0;
+    } else {
+      char buf[] = "HTTP/2.0 500 internal server error\n\
+Content-Type: text/plain; charset=UTF-8\n\
+stream_file_content\n\n";
+      long unsigned int rv = write(fd, buf, strlen(buf));
+      if (rv != strlen(buf)) {
+        fprintf(stderr, "WARN, expected to write %li, but wrote %li\n",
+                strlen(buf), rv);
+      }
+      return 500;
+    }
   }
   logger_debugf("error %i accessing %s", errcode, relativepath);
   char buff[] = "HTTP/2.0 404 OK\n\

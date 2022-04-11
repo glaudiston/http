@@ -33,6 +33,7 @@ static inline void collect_event_data_chunk(struct tcp_event_data *d,
     printf("data received from %s:%s\t(%i bytes):\n%s\n", d->client_host,
            d->client_port, r, &received_data[0]);
   }
+  received_data[r] = 0;
 }
 
 static inline void process_epoll_event(struct context *ctx,
