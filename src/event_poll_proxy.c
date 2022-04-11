@@ -55,7 +55,7 @@ static inline void process_epoll_event(struct context *ctx,
 }
 
 static inline void http_process_events(struct context *ctx, int event_count,
-                                       void *received_data,
+                                       char *received_data,
                                        struct epoll_event *event) {
   struct tcp_event_data *d;
   for (int i = 0; i < event_count; i++) {
