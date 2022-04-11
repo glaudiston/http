@@ -20,9 +20,12 @@ int getFileContent(char *sfile, char *buf) {
   size_t byteCount = 0;
   byteCount += fread(buf, statbuf.st_size, 1, fp);
   if (errno > 0) {
+    if (errno == 21) {
+      return -3;
+    }
     fprintf(stderr, "fail to read the file [%s] %i: %s\n", sfile, errno,
             strerror(errno));
-    return -3;
+    return -4;
   }
   if (fclose(fp) != 0) {
     fprintf(stderr, "fail to close the file [%s] %i: %s\n", sfile, errno,
