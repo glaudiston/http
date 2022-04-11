@@ -25,6 +25,9 @@ void get_static_path(char *static_path, int argc, char *argv[]) {
     fprintf(stderr, "ERROR: unable to open directory [%s]", static_path);
   }
   closedir(dr);
+  if (static_path[strlen(static_path) - 1] != '/')
+    static_path[strlen(static_path)] = '/';
+  static_path[strlen(static_path)] = 0;
 }
 
 // start the thread to listen the tcp port and wait for http input
