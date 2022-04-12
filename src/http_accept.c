@@ -221,8 +221,8 @@ int sanatize_path(char *path, char *sanatized_path) {
   }
   sanatized_path[pp] = 0;
   s_port[ptp] = 0;
-  logger_debugf("sanatize [%i], protocol [%s], host [%s] path [%s]\n", rv,
-                protocol, sanatized_host, sanatized_path);
+  logger_debugf("sanatize [%i], protocol [%s], host [%s] port [%s] path [%s]\n", rv,
+                protocol, sanatized_host, s_port, sanatized_path);
   fflush(stderr);
   return rv;
 }

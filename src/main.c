@@ -6,13 +6,13 @@ int main(int argc, char *argv[]) {
   get_static_path(ctx.static_path, argc, argv);
 
   if ((ctx.fd_epoll = prepareHttpClientPoll()) < 0) {
-    fprintf(stderr, "fail to create http event poll %i: %s\n", errno,
+    logger_errorf("fail to create http event poll %i: %s\n", errno,
             strerror(errno));
     return 1;
   }
 
   if (listenTCPThread(&ctx) != 0) {
-    fprintf(stderr, "fail to create a thread to listen the tcp socket %i: %s\n",
+    logger_errorf( "fail to create a thread to listen the tcp socket %i: %s\n",
             errno, strerror(errno));
     return 2;
   }

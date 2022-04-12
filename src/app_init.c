@@ -6,8 +6,7 @@ static inline int get_server_port(int argc, char *argv[]) {
   if (argc > 1)
     user_selected_port = atoi(argv[1]);
   if (user_selected_port == 0) {
-    logger_warnf("invalid argument port. using port %i. \nsample use: %s "
-                 "8080 /path/to/static/files",
+    logger_warnf("invalid argument port. using port %i. \nsample use: %s 8080 /path/to/static/files\n",
                  DEFAULT_SERVER_PORT, argv[0]);
     user_selected_port = DEFAULT_SERVER_PORT;
   }
@@ -22,7 +21,7 @@ void get_static_path(char *static_path, int argc, char *argv[]) {
   }
   DIR *dr = opendir(static_path);
   if (dr == NULL) {
-    fprintf(stderr, "ERROR: unable to open directory [%s]", static_path);
+    logger_errorf("unable to open directory [%s]\n", static_path);
   }
   closedir(dr);
   if (static_path[strlen(static_path) - 1] != '/')
@@ -36,7 +35,7 @@ void get_static_path(char *static_path, int argc, char *argv[]) {
 static inline int listenTCPThread(struct context *ctx) {
   if (pthread_create(&ctx->thread_tcp_listen, &ctx->thread_tcp_listen_attr,
                      do_listen_tcp, ctx) != 0) {
-    fprintf(stderr, "fail to create the tcp server accept thread %i: %s\n",
+    logger_errorf("fail to create the tcp server accept thread %i: %s\n",
             errno, strerror(errno));
     return -1;
   }
