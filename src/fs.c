@@ -95,10 +95,10 @@ Content-Type: text/plain; charset=UTF-8\n\
       }
       wrote_response_headers = 1;
     }
-    logger_debugf("stream %li bytes read from file \"%s\"\n", readcnt,
+    logger_debugf("stream %lu bytes read from file \"%s\"\n", readcnt,
                   file_path);
     size_t r = write(fd, buf, readcnt);
-    printf("wrote r=%li to resp, %li, %li", r, bufsize, readcnt);
+    printf("wrote r=%lu to resp, %lu, %lu", r, bufsize, readcnt);
     if (r != readcnt) {
       return FS_ERR_WRITE_FAIL;
     }
