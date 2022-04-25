@@ -3,7 +3,7 @@
 void *do_listen_tcp(void *args_ptr) {
   struct context *ctx = (struct context *)args_ptr;
 
-  printf("Starting http ipv4 server on port %i...\n", ctx->port_number);
+  logger_infof("\nStarting http ipv4 server on port %i...\n", ctx->port_number);
 
   // set the listen on a ipv4 socket to serve files to browsers
   int domain = AF_INET;
@@ -17,7 +17,7 @@ void *do_listen_tcp(void *args_ptr) {
   const void *optval = &val;
   socklen_t optlen = sizeof(val);
   if (setsockopt(fd_tcp_server_socket, level, optname, optval, optlen) != 0) {
-    fprintf(stderr, "setsockopt errno %i: %s", errno, strerror(errno));
+    logger_errorf("setsockopt errno %i: %s", errno, strerror(errno));
     char *thread_ret = (char *)malloc(sizeof(char));
     char c = 1;
     memcpy(thread_ret, &c, 1);
@@ -29,7 +29,7 @@ void *do_listen_tcp(void *args_ptr) {
   addr.sin_addr.s_addr = inet_addr("0.0.0.0");
   addr.sin_port = htons(ctx->port_number);
   if (bind(fd_tcp_server_socket, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
-    fprintf(stderr, "bind fail %i: %s\n", errno, strerror(errno));
+    logger_errorf("bind fail %i: %s\n", errno, strerror(errno));
     char *thread_ret = (char *)malloc(sizeof(char));
     char c = 2;
     memcpy(thread_ret, &c, 1);
@@ -40,7 +40,7 @@ void *do_listen_tcp(void *args_ptr) {
   getFileContent("/proc/sys/net/ipv4/tcp_max_syn_backlog", &buf[0]);
   int backlog = atoi(buf);
   if (listen(fd_tcp_server_socket, backlog) != 0) {
-    fprintf(stderr, "listen fails %i: %s\n", errno, strerror(errno));
+    logger_errorf("listen fails %i: %s\n", errno, strerror(errno));
     char *thread_ret = (char *)malloc(sizeof(char));
     char c = 3;
     memcpy(thread_ret, &c, 1);
@@ -49,7 +49,7 @@ void *do_listen_tcp(void *args_ptr) {
   int r = 0;
   for (;;) {
     if ((r = do_accept_tcp_request(fd_tcp_server_socket, ctx->fd_epoll)) != 0) {
-      fprintf(stderr, "fail to accept request %i\n", r);
+      logger_errorf("fail to accept request %i\n", r);
       continue;
     }
   }
@@ -69,8 +69,8 @@ int do_accept_tcp_request(int fd_tcp_server_socket, int fd_epoll) {
   int fd_tcp_client_socket =
       accept(fd_tcp_server_socket, (struct sockaddr *)&cli_addr, &cli_addrsize);
   if (fd_tcp_client_socket == -1) {
-    fprintf(stderr, "fail to accept a connection %i: %s\n", errno,
-            strerror(errno));
+    logger_errorf("fail to accept a connection %i: %s\n", errno,
+                  strerror(errno));
     return 1;
   }
   struct tcp_event_data *d =
@@ -79,8 +79,8 @@ int do_accept_tcp_request(int fd_tcp_server_socket, int fd_epoll) {
                       d->client_host, sizeof(d->client_host), d->client_port,
                       sizeof(d->client_port), 0);
   if (i != 0) {
-    fprintf(stderr, "fail to get client address information %i: %s\n", i,
-            gai_strerror(i));
+    logger_errorf("fail to get client address information %i: %s\n", i,
+                  gai_strerror(i));
     return 2;
   }
   printf("\nConnection accepted from %s:%s\n", d->client_host, d->client_port);
@@ -88,10 +88,10 @@ int do_accept_tcp_request(int fd_tcp_server_socket, int fd_epoll) {
   struct epoll_event epoll_evt = {.events = EPOLLIN, .data = {.ptr = d}};
   i = epoll_ctl(fd_epoll, EPOLL_CTL_ADD, fd_tcp_client_socket, &epoll_evt);
   if (i != 0) {
-    fprintf(stderr, "fail to add client %s:%s to epoll(%i) %i, %i: %s\n",
-            d->client_host, d->client_port, fd_epoll, i, errno,
-            strerror(errno));
-    fprintf(stderr, "fd epoll %i\nfd cli %i", fd_epoll, fd_tcp_client_socket);
+    logger_errorf("fail to add client %s:%s to epoll(%i) %i, %i: %s\n",
+                  d->client_host, d->client_port, fd_epoll, i, errno,
+                  strerror(errno));
+    logger_errorf("fd epoll %i\nfd cli %i", fd_epoll, fd_tcp_client_socket);
     return 3;
   }
   return 0;
@@ -155,7 +155,7 @@ int sanatize_path(char *path, char *sanatized_path) {
     valid_char[(int)valid_char_list[i]] = 1;
   }
 
-  fprintf(stderr, "\n-- checking path [%s][%li]\n", path, strlen(path));
+  logger_infof("\n-- checking path [%s][%li]\n", path, strlen(path));
   int rv = 0;
   char c;
   char lc = 0;
@@ -204,7 +204,7 @@ int sanatize_path(char *path, char *sanatized_path) {
       rv = 1;
       break;
     }
-    fprintf(stderr, "%i=[%c]", pp, c);
+    logger_debugf("%i=[%c]", pp, c);
     if (parsing_host) {
       sanatized_host[hp++] = c;
     } else if (parsing_port) {
@@ -221,9 +221,8 @@ int sanatize_path(char *path, char *sanatized_path) {
   }
   sanatized_path[pp] = 0;
   s_port[ptp] = 0;
-  logger_debugf("sanatize [%i], protocol [%s], host [%s] path [%s]\n", rv,
-                protocol, sanatized_host, sanatized_path);
-  fflush(stderr);
+  logger_debugf("sanatize [%i], protocol [%s], host [%s] port [%s] path [%s]\n",
+                rv, protocol, sanatized_host, s_port, sanatized_path);
   return rv;
 }
 
@@ -243,8 +242,8 @@ int response_with_server_api(struct context *ctx, int fd, char *path) {
   struct dirent *de;
   DIR *dr = opendir(target_sanatized_path);
   if (dr == NULL) {
-    fprintf(stderr, "ERROR: unable to open directory \"%s\"",
-            target_sanatized_path);
+    logger_errorf("ERROR: unable to open directory \"%s\"",
+                  target_sanatized_path);
     sprintf(json, "{ \"status\": \"OPEN_FAIL\", \"path\": \"%s\" }",
             sanatized_path);
   } else {
@@ -268,13 +267,13 @@ Content-Type: application/json; charset=UTF-8\n\
 }
 
 int response_with_list_template(struct context *ctx, int fd) {
-  logger_debugf("respond with list template\n");
+  logger_debugf("%s", "respond with list template\n");
   if (response_cache.template_content == NULL) {
     response_cache.template_content = (char *)malloc(1024);
     int rv;
     if ((rv = getFileContent("./http-templates/list.html",
                              response_cache.template_content)) < 0) {
-      fprintf(stderr, "Request html template list.html fail ret %i\n", rv);
+      logger_errorf("Request html template list.html fail ret %i\n", rv);
       // internal_server_error();
       return 1;
     }
@@ -320,8 +319,8 @@ int process_http_request(struct context *ctx, int fd, char *data_in) {
       char buf[] = "HTTP/2.0 414 URI Too long\n\n";
       long unsigned int rv = write(fd, buf, strlen(buf));
       if (rv != sizeof(buf)) {
-        fprintf(stderr, "WARN expected write %li bytes, but wrote %li",
-                sizeof(buf), rv);
+        logger_errorf("WARN expected write %li bytes, but wrote %li",
+                      sizeof(buf), rv);
         return 1;
       }
       return 0;
@@ -329,8 +328,8 @@ int process_http_request(struct context *ctx, int fd, char *data_in) {
     char buf[] = "HTTP/2.0 500 internal server error at request parsing\n\n";
     long unsigned int rv = write(fd, buf, strlen(buf));
     if (rv != strlen(buf)) {
-      fprintf(stderr, "WARN, expected to write %li, but wrote %li\n",
-              strlen(buf), rv);
+      logger_errorf("WARN, expected to write %li, but wrote %li\n", strlen(buf),
+                    rv);
     }
     return 0;
   }
@@ -349,22 +348,25 @@ int process_http_request(struct context *ctx, int fd, char *data_in) {
   logger_debugf("sanatized refer \"%s\"\n", sanatized_refer);
   if (sanatized_refer[1] == 0) {
     sanatized_refer[0] = 0;
-  } else {
-    if (sanatized_refer[0] != 0 &&
-        sanatized_refer[strlen(sanatized_refer) - 1] != '/') {
-      sanatized_refer[strlen(sanatized_refer)] = '/';
-      sanatized_refer[strlen(sanatized_refer)] = 0;
-    }
   }
   logger_debugf("sanatize  path: \"%s\"\n", req.path);
   sanatize_path(req.path, &sanatized_path[0]);
   logger_debugf("sanatized  path: \"%s\"\n", sanatized_path);
   if (sanatized_refer[0] != 0 && is_dir(sanatized_refer)) {
-    logger_debugf("need to put it relative to referer [%s]", sanatized_refer);
-    sprintf(relativepath, "%s%s%s", ctx->static_path, &sanatized_refer[0],
-            &sanatized_path[0]);
+    // add a slash on a referer only if it is a directory
+    if (sanatized_refer[strlen(sanatized_refer) - 1] != '/') {
+      sanatized_refer[strlen(sanatized_refer)] = '/';
+      sanatized_refer[strlen(sanatized_refer)] = 0;
+      logger_debugf("need to put it relative to referer [%s]", sanatized_refer);
+      sprintf(relativepath, "%s%s%s", ctx->static_path, &sanatized_refer[0],
+              &sanatized_path[0]);
+    } else {
+      logger_debugf("need to put it relative to static path only [%s]",
+                    sanatized_refer);
+      sprintf(relativepath, "%s%s", ctx->static_path, &sanatized_path[0]);
+    }
   } else {
-    logger_debugf("no Referer header.");
+    logger_debugf("%s", "no Referer header.");
     sprintf(relativepath, "%s%s", ctx->static_path, &sanatized_path[0]);
   }
   logger_debugf("accessing \"%s\"...\n", relativepath);
@@ -381,8 +383,8 @@ Content-Type: text/plain; charset=UTF-8\n\
 stream_file_content\n\n";
       long unsigned int rv = write(fd, buf, strlen(buf));
       if (rv != strlen(buf)) {
-        fprintf(stderr, "WARN, expected to write %li, but wrote %li\n",
-                strlen(buf), rv);
+        logger_errorf("WARN, expected to write %li, but wrote %li\n",
+                      strlen(buf), rv);
       }
       return 500;
     }

@@ -13,8 +13,8 @@ int is_dir(char *sfile) {
 size_t get_file_size(char *sfile) {
   struct stat statbuf;
   if (stat(sfile, &statbuf) != 0) {
-    fprintf(stderr, "file stat fail [%s] %i: %s\n", sfile, errno,
-            strerror(errno));
+    logger_errorf("file stat fail [%s] %i: %s\n", sfile, errno,
+                  strerror(errno));
     return -1;
   }
   return statbuf.st_size;
@@ -28,8 +28,8 @@ int getFileContent(char *sfile, char *buf) {
   size_t filesize = get_file_size(sfile);
   FILE *fp = fopen(sfile, "r");
   if (fp == NULL || errno > 0) {
-    fprintf(stderr, "file open fail [%s] %i: %s\n", sfile, errno,
-            strerror(errno));
+    logger_errorf("file open fail [%s] %i: %s\n", sfile, errno,
+                  strerror(errno));
     return FS_ERR_OPEN_FAIL;
   }
   size_t byteCount = 0;
@@ -38,13 +38,13 @@ int getFileContent(char *sfile, char *buf) {
     if (errno == 21) {
       return FS_ERR_IS_DIR;
     }
-    fprintf(stderr, "fail to read the file [%s] %i: %s\n", sfile, errno,
-            strerror(errno));
+    logger_errorf("fail to read the file [%s] %i: %s\n", sfile, errno,
+                  strerror(errno));
     return FS_ERR_READ_FAIL;
   }
   if (fclose(fp) != 0) {
-    fprintf(stderr, "fail to close the file [%s] %i: %s\n", sfile, errno,
-            strerror(errno));
+    logger_errorf("fail to close the file [%s] %i: %s\n", sfile, errno,
+                  strerror(errno));
   }
   return byteCount * filesize;
 }
@@ -57,8 +57,8 @@ int stream_file_content(int fd, char *file_path) {
   char buf[bufsize];
   FILE *fp = fopen(file_path, "r");
   if (fp == NULL || errno > 0) {
-    fprintf(stderr, "stream file open fail [%s] %i: %s\n", file_path, errno,
-            strerror(errno));
+    logger_errorf("stream file open fail [%s] %i: %s\n", file_path, errno,
+                  strerror(errno));
     return FS_ERR_OPEN_FAIL;
   }
   size_t readcnt = 0;
@@ -71,8 +71,8 @@ int stream_file_content(int fd, char *file_path) {
       if (errno == 21) {
         return FS_ERR_IS_DIR;
       }
-      fprintf(stderr, "stream fail to read the file [%s] %i: %s\n", file_path,
-              errno, strerror(errno));
+      logger_errorf("stream fail to read the file [%s] %i: %s\n", file_path,
+                    errno, strerror(errno));
       return FS_ERR_READ_FAIL;
     }
     if (readcnt <= 0) {
@@ -105,8 +105,8 @@ Content-Type: text/plain; charset=UTF-8\n\
     sentbytes += readcnt;
   }
   if (fclose(fp) != 0) {
-    fprintf(stderr, "fail to close the file [%s] %i: %s\n", file_path, errno,
-            strerror(errno));
+    logger_errorf("fail to close the file [%s] %i: %s\n", file_path, errno,
+                  strerror(errno));
   }
   return FS_ERR_NONE;
 }

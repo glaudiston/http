@@ -22,7 +22,7 @@ void get_static_path(char *static_path, int argc, char *argv[]) {
   }
   DIR *dr = opendir(static_path);
   if (dr == NULL) {
-    fprintf(stderr, "ERROR: unable to open directory [%s]", static_path);
+    logger_errorf("ERROR: unable to open directory [%s]", static_path);
   }
   closedir(dr);
   if (static_path[strlen(static_path) - 1] != '/')
@@ -36,8 +36,8 @@ void get_static_path(char *static_path, int argc, char *argv[]) {
 static inline int listenTCPThread(struct context *ctx) {
   if (pthread_create(&ctx->thread_tcp_listen, &ctx->thread_tcp_listen_attr,
                      do_listen_tcp, ctx) != 0) {
-    fprintf(stderr, "fail to create the tcp server accept thread %i: %s\n",
-            errno, strerror(errno));
+    logger_errorf("fail to create the tcp server accept thread %i: %s\n", errno,
+                  strerror(errno));
     return -1;
   }
   return 0;

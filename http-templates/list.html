@@ -16,7 +16,10 @@
 						for ( let i = 0; i < d.entries.length; i++ ){
 							let li = document.createElement('li');
 							let a = document.createElement('a');
-							a.href = d.entries[i];
+							let p = document.location.pathname;
+							if ( !p.endsWith('/') )
+								p += '/';
+							a.href = p+d.entries[i];
 							a.appendChild(document.createTextNode(d.entries[i]));
 							li.appendChild(a);
 							ul.appendChild(li);

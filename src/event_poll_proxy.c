@@ -15,8 +15,8 @@ static inline int prepareHttpClientPoll() {
 static inline int http_wait_events(int fd_epoll, struct epoll_event *event) {
   int fd_tcp_ready = epoll_wait(fd_epoll, event, MAXEVENTS, 1000);
   if (fd_tcp_ready == -1) {
-    fprintf(stderr, "epoll event checking failed %i: %s\n", errno,
-            strerror(errno));
+    logger_errorf("epoll event checking failed %i: %s\n", errno,
+                  strerror(errno));
   }
   return fd_tcp_ready;
 }
@@ -26,12 +26,12 @@ static inline int http_wait_events(int fd_epoll, struct epoll_event *event) {
 // HTTP_REQUEST_DATA_CHUNK_SIZE bytes
 static inline void collect_event_data_chunk(struct tcp_event_data *d,
                                             char *received_data) {
-  printf("reading data from %s:%s\n", d->client_host, d->client_port);
+  logger_infof("reading data from %s:%s\n", d->client_host, d->client_port);
   int r = read(d->fd_tcp_client_socket, &received_data[0],
                HTTP_REQUEST_DATA_CHUNK_SIZE);
   if (r > 0) {
-    printf("data received from %s:%s\t(%i bytes):\n%s\n", d->client_host,
-           d->client_port, r, &received_data[0]);
+    logger_infof("data received from %s:%s\t(%i bytes):\n%s\n", d->client_host,
+                 d->client_port, r, &received_data[0]);
   }
   received_data[r] = 0;
 }
@@ -44,13 +44,13 @@ static inline void process_epoll_event(struct context *ctx,
   // TODO DDOS mitigation: put this event queue on a free promises poll position
   if (process_http_request(ctx, d->fd_tcp_client_socket, &received_data[0]) !=
       0) {
-    fprintf(stderr, "fail to process http request: %s", &received_data[0]);
+    logger_errorf("fail to process http request: %s", &received_data[0]);
   }
 
   // clean up this event
   if (close(d->fd_tcp_client_socket) != 0) {
-    fprintf(stderr, "fail to close client connection on fd %i, %i: %s",
-            d->fd_tcp_client_socket, errno, strerror(errno));
+    logger_errorf("fail to close client connection on fd %i, %i: %s",
+                  d->fd_tcp_client_socket, errno, strerror(errno));
   }
   free(d);
 }
