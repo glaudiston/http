@@ -3,3 +3,4 @@ http-server
 bin/
 tests/
 tags
+*.orig

@@ -286,7 +286,7 @@ Content-Type: text/html; charset=UTF-8\n\
           response_cache.template_content);
   printf("\nRESPONSE:\n%s\n", buff);
   ssize_t r = write(fd, buff, strlen(buff));
-  printf("wrote r=%li to resp, strlen(buff)=%li", r, strlen(buff));
+  printf("wrote r=%lu to resp, strlen(buff)=%lu", r, strlen(buff));
   if (r != strlen(buff)) {
     return 1;
   }
@@ -319,7 +319,7 @@ int process_http_request(struct context *ctx, int fd, char *data_in) {
       char buf[] = "HTTP/2.0 414 URI Too long\n\n";
       long unsigned int rv = write(fd, buf, strlen(buf));
       if (rv != sizeof(buf)) {
-        logger_errorf("WARN expected write %li bytes, but wrote %li",
+        logger_errorf("WARN expected write %lu bytes, but wrote %lu",
                       sizeof(buf), rv);
         return 1;
       }
@@ -328,7 +328,7 @@ int process_http_request(struct context *ctx, int fd, char *data_in) {
     char buf[] = "HTTP/2.0 500 internal server error at request parsing\n\n";
     long unsigned int rv = write(fd, buf, strlen(buf));
     if (rv != strlen(buf)) {
-      logger_errorf("WARN, expected to write %li, but wrote %li\n", strlen(buf),
+      logger_errorf("WARN, expected to write %lu, but wrote %lu\n", strlen(buf),
                     rv);
     }
     return 0;
@@ -383,7 +383,7 @@ Content-Type: text/plain; charset=UTF-8\n\
 stream_file_content\n\n";
       long unsigned int rv = write(fd, buf, strlen(buf));
       if (rv != strlen(buf)) {
-        logger_errorf("WARN, expected to write %li, but wrote %li\n",
+        logger_errorf("WARN, expected to write %lu, but wrote %lu\n",
                       strlen(buf), rv);
       }
       return 500;

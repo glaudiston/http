@@ -6,8 +6,8 @@ static inline int get_server_port(int argc, char *argv[]) {
   if (argc > 1)
     user_selected_port = atoi(argv[1]);
   if (user_selected_port == 0) {
-    logger_warnf("invalid argument port. using port %i. \nsample use: %s "
-                 "8080 /path/to/static/files",
+    logger_warnf("invalid argument port. using port %i. \nsample use: %s 8080 "
+                 "/path/to/static/files\n",
                  DEFAULT_SERVER_PORT, argv[0]);
     user_selected_port = DEFAULT_SERVER_PORT;
   }
@@ -22,7 +22,7 @@ void get_static_path(char *static_path, int argc, char *argv[]) {
   }
   DIR *dr = opendir(static_path);
   if (dr == NULL) {
-    logger_errorf("ERROR: unable to open directory [%s]", static_path);
+    logger_errorf("unable to open directory [%s]\n", static_path);
   }
   closedir(dr);
   if (static_path[strlen(static_path) - 1] != '/')
