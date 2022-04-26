@@ -50,9 +50,25 @@ int getFileContent(char *sfile, char *buf) {
   return byteCount * filesize;
 }
 
+int ends_with(const char *text, const char *substr) {
+  int ts = strlen(text), ss = strlen(substr);
+  return ts >= ss && (strncmp(&text[ts - ss], substr, ss) == 0);
+}
+
 int stream_file_content(int fd, char *file_path) {
+  logger_debugf("streaming file %s\n", file_path);
   errno = 0;
   size_t filesize = get_file_size(file_path);
+  if (filesize == 0) {
+    char HTTP_OK_HEAD[] = "HTTP/2.0 204 No Content\n\
+Content-Type: text/plain; charset=UTF-8\n\
+\n";
+    size_t bcnt = write(fd, HTTP_OK_HEAD, strlen(HTTP_OK_HEAD));
+    if (bcnt <= 0) {
+      return FS_ERR_WRITE_FAIL;
+    }
+    return FS_ERR_NONE;
+  }
   // TODO write cache
   size_t bufsize = 1 << 13;
   char buf[bufsize];
@@ -87,9 +103,21 @@ int stream_file_content(int fd, char *file_path) {
       break;
     }
     if (!wrote_response_headers) {
-      char HTTP_OK_HEAD[] = "HTTP/2.0 200 OK\n\
-Content-Type: text/plain; charset=UTF-8\n\
-\n";
+      char content_type[50];
+      if (ends_with(file_path, ".html")) {
+        sprintf(content_type, "text/html");
+      } else if (ends_with(file_path, ".js")) {
+        sprintf(content_type, "text/javascript");
+      } else {
+        sprintf(content_type, "text/plain");
+      }
+      logger_debugf("content_type detected: %s\n", content_type);
+      fflush(stderr);
+      char HTTP_OK_HEAD[2048];
+      sprintf(HTTP_OK_HEAD, "HTTP/2.0 200 OK\n\
+Content-Type: %s; charset=UTF-8\n\
+\n",
+              content_type);
       size_t bcnt = write(fd, HTTP_OK_HEAD, strlen(HTTP_OK_HEAD));
       if (bcnt <= 0) {
         return FS_ERR_WRITE_FAIL;
