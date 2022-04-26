@@ -7,6 +7,15 @@
 	</head>
 	<body>
 		Listing files
+		<style>
+body{
+	background-color: #aaa;
+	color: #dadada;
+}
+a:visited {
+	color: lightgray;
+}
+		</style>
 		<script >
 			fetch('/.api/list').then(function(r){
 				if (r.status == 200 ) {

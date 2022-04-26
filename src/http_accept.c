@@ -149,8 +149,8 @@ int sanatize_path(char *path, char *sanatized_path) {
   for (i = 0; i < 256; i++) {
     valid_char[i] = 0;
   }
-  char valid_char_list[66] =
-      "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-.:/";
+  char valid_char_list[67] =
+      "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_-.:/";
   for (i = 0; i < strlen(valid_char_list); i++) {
     valid_char[(int)valid_char_list[i]] = 1;
   }
@@ -269,7 +269,8 @@ Content-Type: application/json; charset=UTF-8\n\
 int response_with_list_template(struct context *ctx, int fd) {
   logger_debugf("%s", "respond with list template\n");
   if (response_cache.template_content == NULL) {
-    response_cache.template_content = (char *)malloc(1024);
+    // TODO detect correct file size to alloc cache
+    response_cache.template_content = (char *)malloc(2048);
     int rv;
     if ((rv = getFileContent("./http-templates/list.html",
                              response_cache.template_content)) < 0) {
@@ -278,7 +279,7 @@ int response_with_list_template(struct context *ctx, int fd) {
       return 1;
     }
   }
-  char buff[1 << 10];
+  char buff[1 << 11];
   sprintf(&buff[0], "HTTP/2.0 200 OK\n\
 Content-Type: text/html; charset=UTF-8\n\
 \n\
@@ -313,8 +314,11 @@ int get_header_value(struct http_request *req, char *header_name, char *buf) {
 
 int process_http_request(struct context *ctx, int fd, char *data_in) {
   struct http_request req;
+  req.headers = 0;
   int errcode = parse_request(data_in, &req);
   if (errcode > 0) {
+    if (req.headers != 0)
+      free(req.headers);
     if (errcode == 414) {
       char buf[] = "HTTP/2.0 414 URI Too long\n\n";
       long unsigned int rv = write(fd, buf, strlen(buf));
@@ -336,42 +340,47 @@ int process_http_request(struct context *ctx, int fd, char *data_in) {
   char referer_path[4096];
   referer_path[0] = 0;
   get_header_value(&req, "Referer", &referer_path[0]);
+  // as we don't use headers forwards let's free it
+  if (req.headers != 0)
+    free(req.headers);
   if (strncmp(req.path, "/.api/", 6) == 0) {
-    // TODO user Referer header
     return response_with_server_api(ctx, fd, referer_path);
   }
   char relativepath[1 << 15];
   char sanatized_path[1 << 13];
-  char sanatized_refer[1 << 13];
-  logger_debugf("sanatize refer \"%s\"\n", referer_path);
-  sanatize_path(referer_path, &sanatized_refer[0]);
-  logger_debugf("sanatized refer \"%s\"\n", sanatized_refer);
-  if (sanatized_refer[1] == 0) {
-    sanatized_refer[0] = 0;
-  }
-  logger_debugf("sanatize  path: \"%s\"\n", req.path);
+  logger_debugf("refer:\"%s\"\n", referer_path);
+  logger_debugf("path: \"%s\"\n", req.path);
   sanatize_path(req.path, &sanatized_path[0]);
   logger_debugf("sanatized  path: \"%s\"\n", sanatized_path);
-  if (sanatized_refer[0] != 0 && is_dir(sanatized_refer)) {
-    // add a slash on a referer only if it is a directory
-    if (sanatized_refer[strlen(sanatized_refer) - 1] != '/') {
-      sanatized_refer[strlen(sanatized_refer)] = '/';
-      sanatized_refer[strlen(sanatized_refer)] = 0;
-      logger_debugf("need to put it relative to referer [%s]", sanatized_refer);
-      sprintf(relativepath, "%s%s%s", ctx->static_path, &sanatized_refer[0],
-              &sanatized_path[0]);
-    } else {
-      logger_debugf("need to put it relative to static path only [%s]",
-                    sanatized_refer);
-      sprintf(relativepath, "%s%s", ctx->static_path, &sanatized_path[0]);
-    }
-  } else {
-    logger_debugf("%s", "no Referer header.");
-    sprintf(relativepath, "%s%s", ctx->static_path, &sanatized_path[0]);
-  }
+  sprintf(relativepath, "%s%s", ctx->static_path, &sanatized_path[0]);
   logger_debugf("accessing \"%s\"...\n", relativepath);
-  if (is_dir(relativepath)) {
+  if (is_dir(relativepath) && errno == 0) {
     return response_with_list_template(ctx, fd);
+  } else {
+    if (errno > 0) {
+      logger_debugf("error %i accessing %s", errcode, relativepath);
+    }
+    if (errno == 2) {
+      char buff[] = "HTTP/2.0 404 Not Found\n\
+Content-Type: text/html; charset=UTF-8\n\
+\n\
+<!doctype html><html><body>Not found</body></html>\r\n";
+      ssize_t r = write(fd, buff, strlen(buff));
+      if (r != strlen(buff)) {
+        return 1;
+      }
+      return 404;
+    } else if (errno > 0) {
+      char buff[] = "HTTP/2.0 500 Internal Server Error\n\
+Content-Type: text/html; charset=UTF-8\n\
+\n\
+<!doctype html><html><body>Unexpected error opening the requested file, check the server logs</body></html>\r\n";
+      ssize_t r = write(fd, buff, strlen(buff));
+      if (r != strlen(buff)) {
+        return 1;
+      }
+      return 500;
+    }
   }
   if ((errcode = access(relativepath, F_OK)) == 0) {
     errcode = stream_file_content(fd, relativepath);
@@ -388,15 +397,16 @@ stream_file_content\n\n";
       }
       return 500;
     }
-  }
-  logger_debugf("error %i accessing %s", errcode, relativepath);
-  char buff[] = "HTTP/2.0 404 OK\n\
+  } else {
+    logger_debugf("error %i accessing %s", errcode, relativepath);
+    char buff[] = "HTTP/2.0 500 Internal Server Error\n\
 Content-Type: text/html; charset=UTF-8\n\
 \n\
-<!doctype html><html><body>Not found</body></html>\r\n";
-  ssize_t r = write(fd, buff, strlen(buff));
-  if (r != strlen(buff)) {
-    return 1;
+<!doctype html><html><body>Check the server logs</body></html>\r\n";
+    ssize_t r = write(fd, buff, strlen(buff));
+    if (r != strlen(buff)) {
+      return 1;
+    }
+    return 500;
   }
-  return 0;
 }

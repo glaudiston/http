@@ -1,19 +1,20 @@
 #include "fs.h"
 
 int is_dir(char *sfile) {
+  errno = 0;
   struct stat statbuf;
   if (stat(sfile, &statbuf) != 0) {
-    logger_debugf("file stat fail [%s] %i: %s\n", sfile, errno,
+    logger_debugf("is_dir: file stat fail [%s] %i: %s\n", sfile, errno,
                   strerror(errno));
-    return -1;
+    return 0;
   }
-  return statbuf.st_mode & S_IFDIR;
+  return ((statbuf.st_mode & S_IFDIR) == S_IFDIR);
 }
 
 size_t get_file_size(char *sfile) {
   struct stat statbuf;
   if (stat(sfile, &statbuf) != 0) {
-    logger_errorf("file stat fail [%s] %i: %s\n", sfile, errno,
+    logger_errorf("get_file_size: file stat fail [%s] %i: %s\n", sfile, errno,
                   strerror(errno));
     return -1;
   }
