@@ -108,6 +108,8 @@ Content-Type: text/plain; charset=UTF-8\n\
         sprintf(content_type, "text/html");
       } else if (ends_with(file_path, ".js")) {
         sprintf(content_type, "text/javascript");
+      } else if (ends_with(file_path, ".css")) {
+        sprintf(content_type, "text/css");
       } else {
         sprintf(content_type, "text/plain");
       }
