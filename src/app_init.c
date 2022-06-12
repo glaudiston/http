@@ -34,8 +34,12 @@ void get_static_path(char *static_path, int argc, char *argv[]) {
 // update the ctx object with the thread and thread_attr
 // return 0 on success
 static inline int listenTCPThread(struct context *ctx) {
-  if (pthread_create(&ctx->thread_tcp_listen, &ctx->thread_tcp_listen_attr,
-                     do_listen_tcp, ctx) != 0) {
+  if ( pthread_attr_init(&ctx->thread_tcp_listen_attr) != 0 ) {
+	  logger_errorf("unexpected error preparing the thread attribute init %s", strerror(errno));
+  }
+  int err = pthread_create(&ctx->thread_tcp_listen, &ctx->thread_tcp_listen_attr,
+                     do_listen_tcp, ctx);
+  if ( err != 0 ) {
     logger_errorf("fail to create the tcp server accept thread %i: %s\n", errno,
                   strerror(errno));
     return -1;
