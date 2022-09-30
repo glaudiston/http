@@ -351,7 +351,7 @@ int process_http_request(struct context *ctx, int fd, char *data_in) {
   logger_debugf("refer:\"%s\"\n", referer_path);
   logger_debugf("path: \"%s\"\n", req.path);
   sanatize_path(req.path, &sanatized_path[0]);
-  logger_debugf("sanatized  path: \"%s\"\n", sanatized_path);
+  logger_debugf("sanatized path: \"%s\"\n", sanatized_path);
   sprintf(relativepath, "%s%s", ctx->static_path, &sanatized_path[0]);
   logger_debugf("accessing \"%s\"...\n", relativepath);
   if (is_dir(relativepath) && errno == 0) {

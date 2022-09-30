@@ -40,7 +40,7 @@ static inline int listenTCPThread(struct context *ctx) {
   int err = pthread_create(&ctx->thread_tcp_listen, &ctx->thread_tcp_listen_attr,
                      do_listen_tcp, ctx);
   if ( err != 0 ) {
-    logger_errorf("fail to create the tcp server accept thread %i: %s\n", errno,
+    logger_errorf("fail to create the tcp server accept thread,,, %i, %i: %s\n", err, errno,
                   strerror(errno));
     return -1;
   }
