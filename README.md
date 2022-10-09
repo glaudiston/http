@@ -17,3 +17,7 @@ Because:
 
 # Why C
 	C is great. I can see how things are translated to low level code; In higher level languages it's hard to understand the magic;
+
+# known issues
+	On core linux I've found the need to increase `/proc/sys/kernel/threads-max` value to avoid the error:
+	`runtime/cgo: pthread_create failed: Resource temporarily unavailable`
