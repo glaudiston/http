@@ -9,6 +9,7 @@ docker-build: # build the binary and docker image
 	docker build -t glaudiston/http .
 
 docker-run: # run a container  using the port 8080
+	-docker rm -f http
 	docker run -p 8080:8080 --name http glaudiston/http
 
 check: build # prepare and run tests to ensure quality
