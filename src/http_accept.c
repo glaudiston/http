@@ -226,10 +226,12 @@ int sanatize_path(char *path, char *sanatized_path) {
   return rv;
 }
 
+// response_with_server_api proxy an API to send bytes over a http request
+// returns 0 if sucess or 1 in case of error
 int response_with_server_api(struct context *ctx, int fd, char *path) {
   char buff[1 << 14];
   char json[1 << 13];
-  printf("api requested \"%s\"\n", path);
+  logger_infof("api requested \"%s\"\n", path);
   char sanatized_path[4096];
   char target_sanatized_path[5119];
   logger_debugf("sanatize_path \"%s\"\n", path);
@@ -266,6 +268,8 @@ Content-Type: application/json; charset=UTF-8\n\
   return 0;
 }
 
+// response_with_list_template send the template file bytes over the http response request
+// returns 0 in success or 1 in error
 int response_with_list_template(struct context *ctx, int fd) {
   logger_debugf("%s", "respond with list template\n");
   if (response_cache.template_content == NULL) {
@@ -312,6 +316,28 @@ int get_header_value(struct http_request *req, char *header_name, char *buf) {
   return rv;
 }
 
+
+// write response bytes at buffer for a given http protocol, returning the number of bytes used at the buffer
+// returns -1 in case of error
+int return_http_response(char * buffer, int http_version, int http_status_code, int headers, int body) {
+    char buff[] = "HTTP/2.0 500 Internal Server Error\n\
+Content-Type: text/html; charset=UTF-8\n\
+\n\
+<!doctype html><html><body>Check the server logs</body></html>\r\n";
+    return buff;
+}
+
+#define PROCESS_HTTP_REQUEST_ERROR_NONE			0
+#define PROCESS_HTTP_REQUEST_ERROR_WRITE_RESPONSE_FAIL	1
+#define PROCESS_HTTP_REQUEST_ERROR_API_PROXY_FAIL 	2
+#define PROCESS_HTTP_REQUEST_ERROR_LIST_TEMPLATE	3
+#define PROCESS_HTTP_REQUEST_ERROR_NOT_FOUND		4
+#define PROCESS_HTTP_REQUEST_ERROR_DIR_CHECK		5
+#define PROCESS_HTTP_REQUEST_ERROR_STREAM_FILE_ERROR	6
+#define PROCESS_HTTP_REQUEST_ERROR_INTERNAL		7
+
+// process_http_request is called by the listener event poll
+// it should return zero for success or PROCESS_HTTP_REQUEST_ERROR_* value otherwise
 int process_http_request(struct context *ctx, int fd, char *data_in) {
   struct http_request req;
   req.headers = 0;
@@ -323,19 +349,19 @@ int process_http_request(struct context *ctx, int fd, char *data_in) {
       char buf[] = "HTTP/2.0 414 URI Too long\n\n";
       long unsigned int rv = write(fd, buf, strlen(buf));
       if (rv != sizeof(buf)) {
-        logger_errorf("WARN expected write %lu bytes, but wrote %lu",
+        logger_errorf("expected write %lu bytes, but wrote %lu",
                       sizeof(buf), rv);
-        return 1;
+        return PROCESS_HTTP_REQUEST_ERROR_WRITE_RESPONSE_FAIL;
       }
-      return 0;
+      return PROCESS_HTTP_REQUEST_ERROR_NONE;
     }
     char buf[] = "HTTP/2.0 500 internal server error at request parsing\n\n";
     long unsigned int rv = write(fd, buf, strlen(buf));
     if (rv != strlen(buf)) {
-      logger_errorf("WARN, expected to write %lu, but wrote %lu\n", strlen(buf),
+      logger_errorf("Expected to write %lu, but wrote %lu\n", strlen(buf),
                     rv);
     }
-    return 0;
+    return PROCESS_HTTP_REQUEST_ERROR_NONE;
   }
   char referer_path[4096];
   referer_path[0] = 0;
@@ -344,7 +370,10 @@ int process_http_request(struct context *ctx, int fd, char *data_in) {
   if (req.headers != 0)
     free(req.headers);
   if (strncmp(req.path, "/.api/", 6) == 0) {
-    return response_with_server_api(ctx, fd, referer_path);
+    if ( response_with_server_api(ctx, fd, referer_path) == 0 ) {
+	    return PROCESS_HTTP_REQUEST_ERROR_NONE;
+    }
+    return PROCESS_HTTP_REQUEST_ERROR_API_PROXY_FAIL;
   }
   char relativepath[1 << 15];
   char sanatized_path[1 << 13];
@@ -355,33 +384,37 @@ int process_http_request(struct context *ctx, int fd, char *data_in) {
   sprintf(relativepath, "%s%s", ctx->static_path, &sanatized_path[0]);
   logger_debugf("accessing \"%s\"...\n", relativepath);
   int isdir = is_dir(relativepath);
-  if ( isdir == 0) {
-    return response_with_list_template(ctx, fd);
-  } else {
-    if (-isdir > 0) {
-      logger_debugf("error %i accessing %s", -isdir, relativepath);
+  if ( isdir == 1 ) {
+    logger_debugf("'%s' is a valid dir", relativepath );
+    if ( response_with_list_template(ctx, fd) == 0 ) {
+      return PROCESS_HTTP_REQUEST_ERROR_NONE;
     }
-    if (-isdir == 2) {
-      char buff[] = "HTTP/2.0 404 Not Found\n\
+    return PROCESS_HTTP_REQUEST_ERROR_LIST_TEMPLATE;
+  }
+  if (-isdir > 0) {
+    logger_debugf("error %i accessing %s", -isdir, relativepath);
+  }
+  if (-isdir == 2) {
+    char buff[] = "HTTP/2.0 404 Not Found\n\
 Content-Type: text/html; charset=UTF-8\n\
 \n\
 <!doctype html><html><body>Not found</body></html>\r\n";
-      ssize_t r = write(fd, buff, strlen(buff));
-      if (r != strlen(buff)) {
-        return 1;
-      }
-      return 404;
-    } else if (-isdir > 0) {
-      char buff[] = "HTTP/2.0 500 Internal Server Error\n\
+    ssize_t r = write(fd, buff, strlen(buff));
+    if (r != strlen(buff)) {
+      logger_debugf("expected %i, but got %i", strlen(buff), r);
+      return PROCESS_HTTP_REQUEST_ERROR_WRITE_RESPONSE_FAIL;
+    }
+    return PROCESS_HTTP_REQUEST_ERROR_NOT_FOUND;
+  } else if (-isdir > 0) {
+    char buff[] = "HTTP/2.0 500 Internal Server Error\n\
 Content-Type: text/html; charset=UTF-8\n\
 \n\
 <!doctype html><html><body>Unexpected error opening the requested file, check the server logs</body></html>\r\n";
-      ssize_t r = write(fd, buff, strlen(buff));
-      if (r != strlen(buff)) {
-        return 1;
-      }
-      return 500;
+    ssize_t r = write(fd, buff, strlen(buff));
+    if (r != strlen(buff)) {
+      return PROCESS_HTTP_REQUEST_ERROR_WRITE_RESPONSE_FAIL;
     }
+    return PROCESS_HTTP_REQUEST_ERROR_DIR_CHECK;
   }
   if ((errcode = access(relativepath, F_OK)) == 0) {
     errcode = stream_file_content(fd, relativepath);
@@ -396,7 +429,7 @@ stream_file_content\n\n";
         logger_errorf("WARN, expected to write %lu, but wrote %lu\n",
                       strlen(buf), rv);
       }
-      return 500;
+      return PROCESS_HTTP_REQUEST_ERROR_STREAM_FILE_ERROR;
     }
   } else {
     logger_debugf("error %i accessing %s", errcode, relativepath);
@@ -408,6 +441,6 @@ Content-Type: text/html; charset=UTF-8\n\
     if (r != strlen(buff)) {
       return 1;
     }
-    return 500;
+    return PROCESS_HTTP_REQUEST_ERROR_INTERNAL;
   }
 }

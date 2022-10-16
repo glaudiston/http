@@ -1,6 +1,6 @@
 #include "fs.h"
 
-// is_dir returns 1 if is a directory and 0 otherwise (even if error)
+// is_dir returns 1 if is a directory and 0 otherwise
 // if the return value is lower than 0 you can check the error with strerror(-retval)
 int is_dir(char *sfile) {
   errno = 0;

@@ -42,10 +42,8 @@ static inline void process_epoll_event(struct context *ctx,
   collect_event_data_chunk(d, received_data);
 
   // TODO DDOS mitigation: put this event queue on a free promises poll position
-  if (process_http_request(ctx, d->fd_tcp_client_socket, &received_data[0]) !=
-      0) {
-    logger_errorf("fail to process http request: %s", &received_data[0]);
-  }
+  int errv = process_http_request(ctx, d->fd_tcp_client_socket, &received_data[0]);
+  logger_debugf("http request result code %i", errv);
 
   // clean up this event
   if (close(d->fd_tcp_client_socket) != 0) {
