@@ -354,13 +354,14 @@ int process_http_request(struct context *ctx, int fd, char *data_in) {
   logger_debugf("sanatized path: \"%s\"\n", sanatized_path);
   sprintf(relativepath, "%s%s", ctx->static_path, &sanatized_path[0]);
   logger_debugf("accessing \"%s\"...\n", relativepath);
-  if (is_dir(relativepath) && errno == 0) {
+  int isdir = is_dir(relativepath);
+  if ( isdir == 0) {
     return response_with_list_template(ctx, fd);
   } else {
-    if (errno > 0) {
-      logger_debugf("error %i accessing %s", errcode, relativepath);
+    if (-isdir > 0) {
+      logger_debugf("error %i accessing %s", -isdir, relativepath);
     }
-    if (errno == 2) {
+    if (-isdir == 2) {
       char buff[] = "HTTP/2.0 404 Not Found\n\
 Content-Type: text/html; charset=UTF-8\n\
 \n\
@@ -370,7 +371,7 @@ Content-Type: text/html; charset=UTF-8\n\
         return 1;
       }
       return 404;
-    } else if (errno > 0) {
+    } else if (-isdir > 0) {
       char buff[] = "HTTP/2.0 500 Internal Server Error\n\
 Content-Type: text/html; charset=UTF-8\n\
 \n\

@@ -1,12 +1,15 @@
 #include "fs.h"
 
+// is_dir returns 1 if is a directory and 0 otherwise (even if error)
+// if the return value is lower than 0 you can check the error with strerror(-retval)
 int is_dir(char *sfile) {
   errno = 0;
   struct stat statbuf;
   if (stat(sfile, &statbuf) != 0) {
-    logger_debugf("is_dir: file stat fail [%s] %i: %s\n", sfile, errno,
-                  strerror(errno));
-    return 0;
+    int rv = errno;
+    logger_debugf("is_dir: file stat fail [%s] %i: %s\n", sfile, rv,
+                  strerror(rv));
+    return -rv;
   }
   return ((statbuf.st_mode & S_IFDIR) == S_IFDIR);
 }
